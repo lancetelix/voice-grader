@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>口語作業登記系統</title>
+  <style>
+    body { font-family: sans-serif; padding: 20px; text-align: center; background: #f4f6f8; }
+    .card { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); max-width: 500px; margin: auto; }
+    input[type="text"] { width: 90%; padding: 10px; margin: 10px 0; font-size: 14px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
+    button { font-size: 18px; padding: 12px 24px; border: none; border-radius: 8px; cursor: pointer; margin: 10px; font-weight: bold; }
+    .btn-start { background: #28a745; color: white; }
+    .btn-pause { background: #ffc107; color: #333; }
+    #status { font-weight: bold; color: #0056b3; margin-top: 10px; font-size: 18px;}
+    #errorMsg { color: #dc3545; font-weight: bold; margin: 5px 0; }
+    #log { text-align: left; background: #1e1e1e; color: #00ff66; padding: 10px; border-radius: 6px; height: 150px; overflow-y: auto; margin-top: 15px; font-size: 14px; font-family: monospace; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h2>🎙️️ 口語作業登記系統</h2>
+    <p>請貼上您的 Google Web App 網址：</p>
+    <input type="text" id="webAppUrl" placeholder="https://script.google.com/macros/s/......./exec">
+    <div id="errorMsg"></div>
+
+    <p>當前作業欄位：<b id="currentTask">最新欄位</b></p>
+    <button class="btn-start" onclick="startDictation()">▶️ 開始 / 恢復收音</button>
+    <button class="btn-pause" onclick="pauseDictation()">⏸️ 暫停 (不關麥克風)</button>
+    <div id="status">狀態：待命中...</div>
+    <div id="log">系統紀錄：<br></div>
+  </div>
+
+  <script>
+    var recognition;
+    var activeAssignment = "";
+    var isPaused = true;       // 預設為暫停狀態
+    var isEngineRunning = false; // 麥克風引擎是否已啟動
+
+    // 自動讀取之前輸入過的網址
+    window.onload = function() {
+      var savedUrl = localStorage.getItem("myWebAppUrl");
+      if(savedUrl) document.getElementById('webAppUrl').value = savedUrl;
+    };
+
+    if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+      var SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      recognition = new SpeechRecognition();
+      recognition.continuous = true;
+      recognition.interimResults = false;
+      recognition.lang = 'zh-TW';
+
+      recognition.onresult = function(event) {
+        // 【關鍵】如果是暫停狀態，直接忽略聽到的所有聲音！
+        if (isPaused) return; 
+
+        var last = event.results.length - 1;
+        var command = event.results[last][0].transcript.trim();
+        log("聽到指令：" + command);
+        document.getElementById('status').innerText = "🟢 處理中：" + command;
+
+        var url = document.getElementById('webAppUrl').value.trim();
+        if (!url.includes("script.google.com")) {
+          document.getElementById('errorMsg').innerText = "⚠️ 網址格式錯誤，請檢查上方框框。";
+          return;
+        }
+        
+        localStorage.setItem("myWebAppUrl", url);
+        document.getElementById('errorMsg').innerText = "";
+
+        var fetchUrl = url + "?command=" + encodeURIComponent(command) + "&currentAssignment=" + encodeURIComponent(activeAssignment);
+        
+        fetch(fetchUrl)
+          .then(res => res.json())
+          .then(data => {
+             log("電腦回應：" + data.speak);
+             speakOut(data.speak);
+             if (data.activeAssignment) {
+               activeAssignment = data.activeAssignment;
+               document.getElementById('currentTask').innerText = activeAssignment;
+             }
+             document.getElementById('status').innerText = "🟢 聆聽中...請說出指令";
+          })
+          .catch(err => {
+             log("傳送失敗，請確認網址是否正確。");
+          });
+      };
+
+      // 防睡死機制：如果瀏覽器太安靜自動切斷，我們幫它秒速重啟
+      recognition.onend = function() {
+        if (isEngineRunning) {
+          recognition.start();
+        }
+      };
+
+      recognition.onerror = function(e) { 
+        if (e.error !== 'no-speech') {
+           log("系統提示: " + e.error); 
+        }
+      };
+    } else {
+      document.getElementById('errorMsg').innerText = "⚠️ 此瀏覽器不支援語音功能。";
+    }
+
+    function startDictation() {
+      document.getElementById('errorMsg').innerText = "";
+      isPaused = false; // 解除暫停，開始接收指令
+
+      // 只有在引擎完全沒啟動過時，才真正啟動引擎（只會問一次權限）
+      if (!isEngineRunning) {
+        recognition.start();
+        isEngineRunning = true;
+      }
+      document.getElementById('status').innerText = "🟢 聆聽中...請說出指令";
+      document.getElementById('status').style.color = "#28a745";
+    }
+
+    function pauseDictation() {
+      isPaused = true; // 進入暫停狀態，系統將聽而不聞
+      document.getElementById('status').innerText = "🟡 已暫停 (麥克風待命不關閉)";
+      document.getElementById('status').style.color = "#ffc107";
+    }
+
+    function speakOut(text) {
+      var msg = new SpeechSynthesisUtterance(text);
+      msg.lang = 'zh-TW';
+      window.speechSynthesis.speak(msg);
+    }
+
+    function log(msg) {
+      var logDiv = document.getElementById('log');
+      logDiv.innerHTML += msg + "<br>";
+      logDiv.scrollTop = logDiv.scrollHeight;
+    }
+  </script>
+</body>
+</html>
