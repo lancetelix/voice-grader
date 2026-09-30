@@ -17,7 +17,7 @@
 </head>
 <body>
   <div class="card">
-    <h2>🎙️️ 口語作業登記系統</h2>
+    <h2>🎙 口語作業登記系統</h2>
     <p>請貼上您的 Google Web App 網址：</p>
     <input type="text" id="webAppUrl" placeholder="https://script.google.com/macros/s/......./exec">
     <div id="errorMsg"></div>
@@ -32,10 +32,9 @@
   <script>
     var recognition;
     var activeAssignment = "";
-    var isPaused = true;       // 預設為暫停狀態
-    var isEngineRunning = false; // 麥克風引擎是否已啟動
+    var isPaused = true;       
+    var isEngineRunning = false; 
 
-    // 自動讀取之前輸入過的網址
     window.onload = function() {
       var savedUrl = localStorage.getItem("myWebAppUrl");
       if(savedUrl) document.getElementById('webAppUrl').value = savedUrl;
@@ -49,17 +48,20 @@
       recognition.lang = 'zh-TW';
 
       recognition.onresult = function(event) {
-        // 【關鍵】如果是暫停狀態，直接忽略聽到的所有聲音！
         if (isPaused) return; 
 
         var last = event.results.length - 1;
         var command = event.results[last][0].transcript.trim();
+        
+        // 【新增過濾器】：自動把逗號、句號、頓號、空白等全部消除！
+        command = command.replace(/[，。、！？,\.!?\s]/g, "");
+
         log("聽到指令：" + command);
         document.getElementById('status').innerText = "🟢 處理中：" + command;
 
         var url = document.getElementById('webAppUrl').value.trim();
         if (!url.includes("script.google.com")) {
-          document.getElementById('errorMsg').innerText = "⚠️ 網址格式錯誤，請檢查上方框框。";
+          document.getElementById('errorMsg').innerText = "⚠️️ 網址格式錯誤，請檢查上方框框。";
           return;
         }
         
@@ -84,7 +86,6 @@
           });
       };
 
-      // 防睡死機制：如果瀏覽器太安靜自動切斷，我們幫它秒速重啟
       recognition.onend = function() {
         if (isEngineRunning) {
           recognition.start();
@@ -102,9 +103,8 @@
 
     function startDictation() {
       document.getElementById('errorMsg').innerText = "";
-      isPaused = false; // 解除暫停，開始接收指令
+      isPaused = false; 
 
-      // 只有在引擎完全沒啟動過時，才真正啟動引擎（只會問一次權限）
       if (!isEngineRunning) {
         recognition.start();
         isEngineRunning = true;
@@ -114,7 +114,7 @@
     }
 
     function pauseDictation() {
-      isPaused = true; // 進入暫停狀態，系統將聽而不聞
+      isPaused = true; 
       document.getElementById('status').innerText = "🟡 已暫停 (麥克風待命不關閉)";
       document.getElementById('status').style.color = "#ffc107";
     }
