@@ -35,7 +35,7 @@
     <div class="manual-box">
       <b style="color: #555;">⌨️ 語音不聽話？手動救援輸入：</b><br>
       <div style="display: flex; margin-top: 8px;">
-        <input type="text" id="manualInput" placeholder="例如輸入：3號訂正 (按Enter送出)" style="width: 75%; margin: 0; border-radius: 4px 0 0 4px;">
+        <input type="text" id="manualInput" placeholder="例如輸入：廣播 (按Enter送出)" style="width: 75%; margin: 0; border-radius: 4px 0 0 4px;">
         <button class="btn-manual" onclick="sendManual()" style="width: 25%; border-radius: 0 4px 4px 0;">送出</button>
       </div>
     </div>
@@ -49,9 +49,11 @@
     var isPaused = true;       
     var isEngineRunning = false; 
     var currentMode = ""; 
-    
-    // 🛡️ 【本次關鍵】：新增防回音變數
     var isSpeaking = false; 
+    
+    // 🛡️ 解決 Chrome 念太久當機的專用變數
+    var globalMsg; 
+    var speakTimeout; 
 
     window.onload = function() {
       var savedUrl = localStorage.getItem("myWebAppUrl");
@@ -73,24 +75,51 @@
       recognition.lang = 'zh-TW';
 
       recognition.onresult = function(event) {
-        // 🛡️ 【關鍵防護】：如果人為暫停，或是「電腦正在說話」，一律當作沒聽到！
         if (isPaused || isSpeaking) return; 
-
         var last = event.results.length - 1;
-        var command = event.results[last][0].transcript.trim();
+        var rawCommand = event.results[last][0].transcript.trim();
+        processCommand(rawCommand); // 交給統一的大腦處理
+      };
+
+      recognition.onend = function() {
+        if (isEngineRunning) { recognition.start(); }
+      };
+
+      recognition.onerror = function(e) { 
+        if (e.error !== 'no-speech') { log("系統提示: " + e.error); }
+      };
+    } else {
+      document.getElementById('errorMsg').innerText = "⚠️ 此瀏覽器不支援語音功能。";
+    }
+
+    function sendManual() {
+      var inputField = document.getElementById("manualInput");
+      var rawCommand = inputField.value.trim();
+      if (!rawCommand) return;
+      log("⌨️ 手動輸入：" + rawCommand);
+      inputField.value = ""; 
+      processCommand(rawCommand); // 手動打字也走一樣的大腦，保證不會出錯
+    }
+
+    // 🧠 統一的指令處理大腦 (不管是用講的還是用打的，都從這裡過濾)
+    function processCommand(command) {
         if (!command) return;
 
         command = command.replace(/[，。、！？,\.!?]/g, " ");
 
+        // 處理開頭吞字
         command = command.replace(/^(生作業|新作業|分作業|作業)/, "新增作業");
         if (command.startsWith("新增") && !command.startsWith("新增作業")) {
             command = command.replace("新增", "新增作業");
         }
 
+        // 🚀 【終極防呆字典】加入所有可能的贅字與變體
         const corrections = {
           "國旗": "國習", "國錫": "國習", "國席": "國習", "席作": "習作",
           "月": "頁", "號隊": "號對", "號錯": "號錯",
-          "訂證": "訂正", "頂正": "訂正", "單號": "3號", "山號": "3號", "傘號": "3號", "兩號": "2號"
+          "訂證": "訂正", "頂正": "訂正", "單號": "3號", "山號": "3號", "傘號": "3號", "兩號": "2號",
+          "水沒": "誰沒", "隨沒": "誰沒", "誰沒有": "誰沒", "誰還沒": "誰沒", "有誰沒": "誰沒",
+          "廣博": "廣播", "光播": "廣播", "廣波": "廣播"
         };
 
         for (let wrong in corrections) {
@@ -99,7 +128,9 @@
         if (!command) return;
 
         var hasNumbers = /\d+/.test(command);
-        var isQuery = command.includes("誰沒訂正") || command.includes("廣播") || command.includes("誰沒交") || command.includes("欠") || command.includes("缺");
+        
+        // 🛡️ 【查詢保護罩】：只要含有「誰沒」或「廣播」，系統絕對不准切換模式！
+        var isQuery = command.includes("誰沒") || command.includes("廣播") || command.includes("欠") || command.includes("缺");
         
         if (!hasNumbers && !command.includes("新增作業") && !isQuery) {
            if (command.includes("正確") || command.includes("對") || command.includes("過")) {
@@ -127,30 +158,9 @@
         }
 
         executeCommand(command); 
-      };
-
-      recognition.onend = function() {
-        if (isEngineRunning) { recognition.start(); }
-      };
-
-      recognition.onerror = function(e) { 
-        if (e.error !== 'no-speech') { log("系統提示: " + e.error); }
-      };
-    } else {
-      document.getElementById('errorMsg').innerText = "⚠️ 此瀏覽器不支援語音功能。";
-    }
-
-    function sendManual() {
-      var inputField = document.getElementById("manualInput");
-      var command = inputField.value.trim();
-      if (!command) return;
-      log("⌨️ 手動輸入：" + command);
-      inputField.value = ""; 
-      executeCommand(command); 
     }
 
     function executeCommand(command) {
-        // 如果不是手動暫停，就把狀態改為處理中
         if (!isPaused) {
             document.getElementById('status').innerText = "🟢 處理中...";
             document.getElementById('status').style.color = "#0056b3";
@@ -173,7 +183,6 @@
                document.getElementById('currentTask').innerText = activeAssignment;
              }
              
-             // 如果沒有在說話，也沒有暫停，就恢復聆聽狀態
              if (!isSpeaking && !isPaused) {
                  document.getElementById('status').innerText = "🟢 聆聽中...";
                  document.getElementById('status').style.color = "#28a745";
@@ -205,22 +214,35 @@
       document.getElementById('status').style.color = "#ffc107";
     }
 
-    // 🛡️ 【大幅強化發聲模組】：開口前閉耳，講完後開耳
+    // 🔊 【終極防當機發聲模組】
     function speakOut(text) {
-      isSpeaking = true; // 電腦開口，耳朵閉上
-      
-      // 介面提示
+      isSpeaking = true; 
+      clearTimeout(speakTimeout); 
+
       document.getElementById('status').innerText = "🔊 電腦發聲中 (暫停收音)...";
       document.getElementById('status').style.color = "#17a2b8";
 
-      var msg = new SpeechSynthesisUtterance(text);
-      msg.lang = 'zh-TW';
+      // 把對話存入全域變數，防止 Chrome 把它當成垃圾刪掉
+      globalMsg = new SpeechSynthesisUtterance(text);
+      globalMsg.lang = 'zh-TW';
       
-      // 電腦講完話的時候觸發
-      msg.onend = function() {
-        // 刻意延遲 0.5 秒再打開耳朵，確保環境空間的回音徹底消失
-        setTimeout(function() {
+      // 動態計算這段話需要唸多久 (1個字算0.3秒，最少給3秒，再加2秒緩衝)
+      var safeTime = Math.max(3000, text.length * 300) + 2000;
+      
+      // 強制解鎖保險絲：時間一到，強制把麥克風耳朵打開，絕不卡死！
+      speakTimeout = setTimeout(function() {
           isSpeaking = false;
+          if (!isPaused) {
+            document.getElementById('status').innerText = "🟢 聆聽中...";
+            document.getElementById('status').style.color = "#28a745";
+          }
+      }, safeTime);
+
+      globalMsg.onend = function() {
+        setTimeout(function() {
+          if (!isSpeaking) return; // 已經被保險絲解鎖就不做事
+          isSpeaking = false;
+          clearTimeout(speakTimeout);
           if (!isPaused) {
             document.getElementById('status').innerText = "🟢 聆聽中...";
             document.getElementById('status').style.color = "#28a745";
@@ -228,16 +250,16 @@
         }, 500); 
       };
 
-      // 萬一發聲錯誤，也要把狀態解除
-      msg.onerror = function() {
+      globalMsg.onerror = function() {
         isSpeaking = false;
+        clearTimeout(speakTimeout);
         if (!isPaused) {
             document.getElementById('status').innerText = "🟢 聆聽中...";
             document.getElementById('status').style.color = "#28a745";
         }
       };
 
-      window.speechSynthesis.speak(msg);
+      window.speechSynthesis.speak(globalMsg);
     }
 
     function log(msg) {
