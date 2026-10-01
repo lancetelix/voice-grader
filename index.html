@@ -10,10 +10,12 @@
     button { font-size: 18px; padding: 12px 24px; border: none; border-radius: 8px; cursor: pointer; margin: 10px; font-weight: bold; }
     .btn-start { background: #28a745; color: white; }
     .btn-pause { background: #ffc107; color: #333; }
+    .btn-manual { background: #007bff; color: white; padding: 10px 15px; font-size: 16px; margin: 0; }
     #status { font-weight: bold; color: #0056b3; margin-top: 10px; font-size: 18px;}
     #currentModeDisplay { font-weight: bold; color: #dc3545; font-size: 20px; margin: 10px 0;}
     #errorMsg { color: #dc3545; font-weight: bold; margin: 5px 0; }
     #log { text-align: left; background: #1e1e1e; color: #00ff66; padding: 10px; border-radius: 6px; height: 150px; overflow-y: auto; margin-top: 15px; font-size: 14px; font-family: monospace; }
+    .manual-box { margin-top: 20px; padding-top: 15px; border-top: 1px dashed #ccc; text-align: left;}
   </style>
 </head>
 <body>
@@ -27,8 +29,18 @@
     <div id="currentModeDisplay">當前模式：自動辨識</div>
 
     <button class="btn-start" onclick="startDictation()">▶️ 開始 / 恢復收音</button>
-    <button class="btn-pause" onclick="pauseDictation()">⏸️ 暫停 (不關麥克風)</button>
+    <button class="btn-pause" onclick="pauseDictation()">⏸️️ 暫停 (不關麥克風)</button>
     <div id="status">狀態：待命中...</div>
+    
+    <!-- 手動救援區 -->
+    <div class="manual-box">
+      <b style="color: #555;">⌨️ 語音不聽話？手動救援輸入：</b><br>
+      <div style="display: flex; margin-top: 8px;">
+        <input type="text" id="manualInput" placeholder="例如輸入：3號訂正 (按Enter送出)" style="width: 75%; margin: 0; border-radius: 4px 0 0 4px;">
+        <button class="btn-manual" onclick="sendManual()" style="width: 25%; border-radius: 0 4px 4px 0;">送出</button>
+      </div>
+    </div>
+
     <div id="log">系統紀錄：<br></div>
   </div>
 
@@ -37,13 +49,19 @@
     var activeAssignment = "";
     var isPaused = true;       
     var isEngineRunning = false; 
-    
-    // 【新增】用來記憶目前是「正確」還是「錯誤」模式
     var currentMode = ""; 
 
     window.onload = function() {
       var savedUrl = localStorage.getItem("myWebAppUrl");
       if(savedUrl) document.getElementById('webAppUrl').value = savedUrl;
+      
+      // 綁定手動輸入框的 Enter 鍵功能
+      document.getElementById("manualInput").addEventListener("keypress", function(event) {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          sendManual();
+        }
+      });
     };
 
     if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
@@ -60,93 +78,52 @@
         var command = event.results[last][0].transcript.trim();
         if (!command) return;
 
-        // 【修正蟲蟲】把標點符號換成「空白」，並保留原本的空白，數字才不會黏在一起！
         command = command.replace(/[，。、！？,\.!?]/g, " ");
 
-        // 防吞字攔截
         command = command.replace(/^(生作業|新作業|分作業|作業)/, "新增作業");
         if (command.startsWith("新增") && !command.startsWith("新增作業")) {
             command = command.replace("新增", "新增作業");
         }
 
-        // 校正字典
         const corrections = {
           "國旗": "國習", "國錫": "國習", "國席": "國習", "席作": "習作",
-          "月": "頁", "號隊": "號對", "號錯": "號錯"
+          "月": "頁", "號隊": "號對", "號錯": "號錯",
+          "訂證": "訂正", "頂正": "訂正", "單號": "3號", "山號": "3號", "傘號": "3號", "兩號": "2號"
         };
+
         for (let wrong in corrections) {
           command = command.split(wrong).join(corrections[wrong]);
         }
         if (!command) return;
 
-        // ==========================================
-        // 🧠 【大腦記憶區：模式切換與自動補字】
-        // ==========================================
         var hasNumbers = /\d+/.test(command);
-        var isSettingMode = false;
-
-        // 1. 如果講話裡面「沒有數字」，可能是在切換模式
+        
         if (!hasNumbers && !command.includes("新增作業")) {
            if (command.includes("正確") || command.includes("對") || command.includes("過")) {
                currentMode = "正確";
                document.getElementById('currentModeDisplay').innerText = "當前模式：🟢 正確 (Δ) - 請直接報號";
-               speakOut("切換正確模式");
-               log("系統切換至：正確模式");
-               return; // 只要切換模式就好，不用傳送給試算表
+               speakOut("切換正確模式"); log("系統切換至：正確模式"); return; 
            }
            if (command.includes("錯誤") || command.includes("錯")) {
                currentMode = "錯誤";
                document.getElementById('currentModeDisplay').innerText = "當前模式：🔴 錯誤 (✓) - 請直接報號";
-               speakOut("切換錯誤模式");
-               log("系統切換至：錯誤模式");
-               return;
+               speakOut("切換錯誤模式"); log("系統切換至：錯誤模式"); return;
            }
            if (command.includes("好") || command.includes("訂正") || command.includes("完成")) {
                currentMode = "訂正";
                document.getElementById('currentModeDisplay').innerText = "當前模式：🔵 訂正銷案 - 請直接報號";
-               speakOut("切換訂正模式");
-               log("系統切換至：訂正模式");
-               return;
+               speakOut("切換訂正模式"); log("系統切換至：訂正模式"); return;
            }
         }
 
-        // 2. 如果講話裡面「有數字」，但沒有講「正確/錯誤」，我們幫它加上記憶的模式！
         if (hasNumbers && !command.includes("新增作業") && !command.includes("欠") && !command.includes("缺")) {
             var hasActionWord = command.match(/(正確|過|對|錯誤|錯|好|訂正|完成)/);
             if (!hasActionWord && currentMode !== "") {
-                // 自動把記住的模式加到前面 (例如：「4號 10號」變成「正確 4號 10號」)
                 command = currentMode + " " + command;
             }
         }
 
-        // ==========================================
-
-        log("最終傳送指令：" + command);
-        document.getElementById('status').innerText = "🟢 處理中...";
-
-        var url = document.getElementById('webAppUrl').value.trim();
-        if (!url.includes("script.google.com")) return;
-        
-        localStorage.setItem("myWebAppUrl", url);
-
-        var fetchUrl = url + "?command=" + encodeURIComponent(command) + "&currentAssignment=" + encodeURIComponent(activeAssignment);
-        
-        fetch(fetchUrl)
-          .then(res => res.json())
-          .then(data => {
-             log("電腦回應：" + data.speak);
-             if (data.speak !== "收到指令但未辨識成功") {
-                speakOut(data.speak);
-             }
-             if (data.activeAssignment) {
-               activeAssignment = data.activeAssignment;
-               document.getElementById('currentTask').innerText = activeAssignment;
-             }
-             document.getElementById('status').innerText = "🟢 聆聽中...";
-          })
-          .catch(err => {
-             log("傳送失敗，網路不穩。");
-          });
+        executeCommand(command); // 呼叫共用的發送函數
       };
 
       recognition.onend = function() {
@@ -158,6 +135,42 @@
       };
     } else {
       document.getElementById('errorMsg').innerText = "⚠️ 此瀏覽器不支援語音功能。";
+    }
+
+    // 處理手動救援輸入
+    function sendManual() {
+      var inputField = document.getElementById("manualInput");
+      var command = inputField.value.trim();
+      if (!command) return;
+      
+      log("⌨️ 手動輸入：" + command);
+      inputField.value = ""; // 清空輸入框
+      executeCommand(command); // 送出指令
+    }
+
+    // 負責傳送指令給試算表的共用函數 (語音跟手動都會呼叫這個)
+    function executeCommand(command) {
+        document.getElementById('status').innerText = "🟢 處理中...";
+        var url = document.getElementById('webAppUrl').value.trim();
+        if (!url.includes("script.google.com")) return;
+        
+        localStorage.setItem("myWebAppUrl", url);
+        var fetchUrl = url + "?command=" + encodeURIComponent(command) + "&currentAssignment=" + encodeURIComponent(activeAssignment);
+        
+        fetch(fetchUrl)
+          .then(res => res.json())
+          .then(data => {
+             log("電腦回應：" + data.speak);
+             if (data.speak !== "收到指令但未辨識成功") speakOut(data.speak);
+             if (data.activeAssignment) {
+               activeAssignment = data.activeAssignment;
+               document.getElementById('currentTask').innerText = activeAssignment;
+             }
+             document.getElementById('status').innerText = isPaused ? "🟡 已暫停" : "🟢 聆聽中...";
+          })
+          .catch(err => {
+             log("傳送失敗，網路不穩。");
+          });
     }
 
     function startDictation() {
