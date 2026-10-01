@@ -29,7 +29,7 @@
     <div id="currentModeDisplay">當前模式：自動辨識</div>
 
     <button class="btn-start" onclick="startDictation()">▶️ 開始 / 恢復收音</button>
-    <button class="btn-pause" onclick="pauseDictation()">⏸️️ 暫停 (不關麥克風)</button>
+    <button class="btn-pause" onclick="pauseDictation()">⏸️ 暫停 (不關麥克風)</button>
     <div id="status">狀態：待命中...</div>
     
     <!-- 手動救援區 -->
@@ -55,7 +55,6 @@
       var savedUrl = localStorage.getItem("myWebAppUrl");
       if(savedUrl) document.getElementById('webAppUrl').value = savedUrl;
       
-      // 綁定手動輸入框的 Enter 鍵功能
       document.getElementById("manualInput").addEventListener("keypress", function(event) {
         if (event.key === "Enter") {
           event.preventDefault();
@@ -98,7 +97,11 @@
 
         var hasNumbers = /\d+/.test(command);
         
-        if (!hasNumbers && !command.includes("新增作業")) {
+        // 🚀 【本次關鍵修復】：建立「查詢指令保護區」
+        var isQuery = command.includes("誰沒訂正") || command.includes("廣播") || command.includes("誰沒交") || command.includes("欠") || command.includes("缺");
+        
+        // 只有在「不是查詢指令」的時候，才允許它去切換模式
+        if (!hasNumbers && !command.includes("新增作業") && !isQuery) {
            if (command.includes("正確") || command.includes("對") || command.includes("過")) {
                currentMode = "正確";
                document.getElementById('currentModeDisplay').innerText = "當前模式：🟢 正確 (Δ) - 請直接報號";
@@ -116,14 +119,15 @@
            }
         }
 
-        if (hasNumbers && !command.includes("新增作業") && !command.includes("欠") && !command.includes("缺")) {
+        // 送出指令前，確保不會把模式字眼加到查詢指令上
+        if (hasNumbers && !command.includes("新增作業") && !isQuery) {
             var hasActionWord = command.match(/(正確|過|對|錯誤|錯|好|訂正|完成)/);
             if (!hasActionWord && currentMode !== "") {
                 command = currentMode + " " + command;
             }
         }
 
-        executeCommand(command); // 呼叫共用的發送函數
+        executeCommand(command); 
       };
 
       recognition.onend = function() {
@@ -137,18 +141,15 @@
       document.getElementById('errorMsg').innerText = "⚠️ 此瀏覽器不支援語音功能。";
     }
 
-    // 處理手動救援輸入
     function sendManual() {
       var inputField = document.getElementById("manualInput");
       var command = inputField.value.trim();
       if (!command) return;
-      
       log("⌨️ 手動輸入：" + command);
-      inputField.value = ""; // 清空輸入框
-      executeCommand(command); // 送出指令
+      inputField.value = ""; 
+      executeCommand(command); 
     }
 
-    // 負責傳送指令給試算表的共用函數 (語音跟手動都會呼叫這個)
     function executeCommand(command) {
         document.getElementById('status').innerText = "🟢 處理中...";
         var url = document.getElementById('webAppUrl').value.trim();
