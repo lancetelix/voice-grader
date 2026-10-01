@@ -1,45 +1,281 @@
-function executeCommand(command) {
-    if (!isPaused) {
-        document.getElementById('status').innerText = "🟢 處理中...";
-        document.getElementById('status').style.color = "#0056b3";
-    }
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>口語作業登記系統</title>
+  <style>
+    body { font-family: sans-serif; padding: 20px; text-align: center; background: #f4f6f8; }
+    .card { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); max-width: 500px; margin: auto; }
+    input[type="text"] { width: 90%; padding: 10px; margin: 10px 0; font-size: 14px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
+    button { font-size: 18px; padding: 12px 24px; border: none; border-radius: 8px; cursor: pointer; margin: 10px; font-weight: bold; }
+    .btn-start { background: #28a745; color: white; }
+    .btn-pause { background: #ffc107; color: #333; }
+    .btn-manual { background: #007bff; color: white; padding: 10px 15px; font-size: 16px; margin: 0; }
+    #status { font-weight: bold; color: #0056b3; margin-top: 10px; font-size: 18px;}
+    #currentModeDisplay { font-weight: bold; color: #dc3545; font-size: 20px; margin: 10px 0;}
+    #errorMsg { color: #dc3545; font-weight: bold; margin: 5px 0; }
+    #log { text-align: left; background: #1e1e1e; color: #00ff66; padding: 10px; border-radius: 6px; height: 160px; overflow-y: auto; margin-top: 15px; font-size: 14px; font-family: monospace; }
+    .manual-box { margin-top: 20px; padding-top: 15px; border-top: 1px dashed #ccc; text-align: left;}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h2>🎙 口語作業登記系統</h2>
+    <p>請貼上 Web App 網址：</p>
+    <input type="text" id="webAppUrl" placeholder="https://script.google.com/macros/s/......./exec">
+    <div id="errorMsg"></div>
 
-    var url = document.getElementById('webAppUrl').value.trim();
-    if (!url.includes("script.google.com") || url.includes(".......")) {
-        log("⚠️ 錯誤：請先在上方框框貼上正確的 Web App 網址！");
-        return;
-    }
-    
-    localStorage.setItem("myWebAppUrl", url);
-    var fetchUrl = url + "?command=" + encodeURIComponent(command) + "&currentAssignment=" + encodeURIComponent(activeAssignment);
-    
-    // 💡 即時印出連線提示，讓您知道系統正在運作
-    log("⏳ 正在傳送指令至 Google 雲端...");
+    <p>當前作業：<b id="currentTask">最新欄位</b></p>
+    <div id="currentModeDisplay">當前模式：自動辨識</div>
 
-    fetch(fetchUrl)
-      .then(res => {
-         if (!res.ok) throw new Error("HTTP 錯誤 " + res.status);
-         return res.json();
-      })
-      .then(data => {
-         log("💻 電腦回應：" + data.speak);
-         if (data.speak !== "收到指令但未辨識成功") speakOut(data.speak);
-         
-         if (data.activeAssignment) {
-           activeAssignment = data.activeAssignment;
-           document.getElementById('currentTask').innerText = activeAssignment;
-         }
-         
-         if (!isSpeaking && !isPaused) {
-             document.getElementById('status').innerText = "🟢 聆聽中...";
-             document.getElementById('status').style.color = "#28a745";
-         }
-      })
-      .catch(err => {
-         log("❌ 連線失敗/後台回應異常：" + err.message);
-         if (!isPaused) {
-             document.getElementById('status').innerText = "🟢 聆聽中...";
-             document.getElementById('status').style.color = "#28a745";
-         }
+    <button class="btn-start" onclick="startDictation()">▶️ 開始 / 恢復收音</button>
+    <button class="btn-pause" onclick="pauseDictation()">⏸️ 暫停收音</button>
+    <div id="status">狀態：待命中...</div>
+    
+    <div class="manual-box">
+      <b style="color: #555;">⌨️️ 語音不聽話？手動救援輸入：</b><br>
+      <div style="display: flex; margin-top: 8px;">
+        <input type="text" id="manualInput" placeholder="例如輸入：廣播 (按Enter送出)" style="width: 75%; margin: 0; border-radius: 4px 0 0 4px;">
+        <button class="btn-manual" onclick="sendManual()" style="width: 25%; border-radius: 0 4px 4px 0;">送出</button>
+      </div>
+    </div>
+
+    <div id="log">系統紀錄：<br></div>
+  </div>
+
+  <script>
+    var recognition;
+    var activeAssignment = "";
+    var isPaused = true;       
+    var currentMode = ""; 
+    var isSpeaking = false; 
+    
+    var globalMsg; 
+    var speakTimeout; 
+
+    window.onload = function() {
+      var savedUrl = localStorage.getItem("myWebAppUrl");
+      if(savedUrl) document.getElementById('webAppUrl').value = savedUrl;
+      
+      document.getElementById("manualInput").addEventListener("keypress", function(event) {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          sendManual();
+        }
       });
-}
+    };
+
+    if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+      var SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      recognition = new SpeechRecognition();
+      recognition.continuous = true;
+      recognition.interimResults = false;
+      recognition.lang = 'zh-TW';
+
+      recognition.onresult = function(event) {
+        if (isPaused || isSpeaking) return; 
+        var last = event.results.length - 1;
+        var rawCommand = event.results[last][0].transcript.trim();
+        processCommand(rawCommand); 
+      };
+
+      recognition.onend = function() {
+        if (!isPaused && !isSpeaking) { 
+            try { recognition.start(); } catch(e) {} 
+        }
+      };
+
+      recognition.onerror = function(e) { 
+        if (e.error !== 'no-speech' && e.error !== 'aborted') { 
+            log("系統提示: " + e.error); 
+        }
+      };
+    } else {
+      document.getElementById('errorMsg').innerText = "⚠️ 此瀏覽器不支援語音功能。";
+    }
+
+    function sendManual() {
+      var inputField = document.getElementById("manualInput");
+      var rawCommand = inputField.value.trim();
+      if (!rawCommand) return;
+      log("⌨️ 手動輸入：" + rawCommand);
+      inputField.value = ""; 
+      processCommand(rawCommand); 
+    }
+
+    function processCommand(command) {
+        if (!command) return;
+
+        command = command.replace(/[，。、！？,\.!?]/g, " ");
+
+        command = command.replace(/^(生作業|新作業|分作業|作業)/, "新增作業");
+        if (command.startsWith("新增") && !command.startsWith("新增作業")) {
+            command = command.replace("新增", "新增作業");
+        }
+
+        const corrections = {
+          "國旗": "國習", "國錫": "國習", "國席": "國習", "席作": "習作",
+          "月": "頁", "號隊": "號對", "號錯": "號錯",
+          "訂證": "訂正", "頂正": "訂正", "單號": "3號", "山號": "3號", "傘號": "3號", "兩號": "2號",
+          "水沒": "誰沒", "隨沒": "誰沒", "誰沒有": "誰沒", "誰還沒": "誰沒", "有誰沒": "誰沒",
+          "廣博": "廣播", "光播": "廣播", "廣波": "廣播"
+        };
+
+        for (let wrong in corrections) {
+          command = command.split(wrong).join(corrections[wrong]);
+        }
+        if (!command) return;
+
+        var hasNumbers = /\d+/.test(command);
+        var isQuery = command.includes("誰沒") || command.includes("廣播") || command.includes("欠") || command.includes("缺");
+        
+        if (!hasNumbers && !command.includes("新增作業") && !isQuery) {
+           if (command.includes("正確") || command.includes("對") || command.includes("過")) {
+               currentMode = "正確";
+               document.getElementById('currentModeDisplay').innerText = "當前模式：🟢 正確 (Δ) - 請直接報號";
+               speakOut("切換正確模式"); log("系統切換至：正確模式"); return; 
+           }
+           if (command.includes("錯誤") || command.includes("錯")) {
+               currentMode = "錯誤";
+               document.getElementById('currentModeDisplay').innerText = "當前模式：🔴 錯誤 (✓) - 請直接報號";
+               speakOut("切換錯誤模式"); log("系統切換至：錯誤模式"); return;
+           }
+           if (command.includes("好") || command.includes("訂正") || command.includes("完成")) {
+               currentMode = "訂正";
+               document.getElementById('currentModeDisplay').innerText = "當前模式：🔵 訂正銷案 - 請直接報號";
+               speakOut("切換訂正模式"); log("系統切換至：訂正模式"); return;
+           }
+        }
+
+        if (hasNumbers && !command.includes("新增作業") && !isQuery) {
+            var hasActionWord = command.match(/(正確|過|對|錯誤|錯|好|訂正|完成)/);
+            if (!hasActionWord && currentMode !== "") {
+                command = currentMode + " " + command;
+            }
+        }
+
+        executeCommand(command); 
+    }
+
+    function executeCommand(command) {
+        document.getElementById('errorMsg').innerText = "";
+
+        var url = document.getElementById('webAppUrl').value.trim();
+        if (!url || !url.includes("script.google.com") || url.includes(".......")) {
+            document.getElementById('errorMsg').innerText = "⚠️ 請先在上方框框貼上正確的 Web App 網址！";
+            log("⚠️ 錯誤：尚未設定有效的 Web App 網址。");
+            return;
+        }
+        
+        if (!isPaused) {
+            document.getElementById('status').innerText = "🟢 處理中...";
+            document.getElementById('status').style.color = "#0056b3";
+        }
+
+        localStorage.setItem("myWebAppUrl", url);
+        var fetchUrl = url + "?command=" + encodeURIComponent(command) + "&currentAssignment=" + encodeURIComponent(activeAssignment);
+        
+        log("⏳ 正在傳送指令至 Google 雲端...");
+
+        fetch(fetchUrl)
+          .then(res => {
+             if (!res.ok) throw new Error("HTTP 錯誤 " + res.status);
+             return res.json();
+          })
+          .then(data => {
+             log("💻 電腦回應：" + data.speak);
+             if (data.speak !== "收到指令但未辨識成功") speakOut(data.speak);
+             
+             if (data.activeAssignment) {
+               activeAssignment = data.activeAssignment;
+               document.getElementById('currentTask').innerText = activeAssignment;
+             }
+             
+             if (!isSpeaking && !isPaused) {
+                 document.getElementById('status').innerText = "🟢 聆聽中...";
+                 document.getElementById('status').style.color = "#28a745";
+             }
+          })
+          .catch(err => {
+             log("❌ 連線失敗/後台回應異常：" + err.message);
+             if (!isPaused) {
+                 document.getElementById('status').innerText = "🟢 聆聽中...";
+                 document.getElementById('status').style.color = "#28a745";
+             }
+          });
+    }
+
+    function startDictation() {
+      document.getElementById('errorMsg').innerText = "";
+      isPaused = false; 
+      try { recognition.start(); } catch(e) {} 
+      document.getElementById('status').innerText = "🟢 聆聽中...";
+      document.getElementById('status').style.color = "#28a745";
+    }
+
+    function pauseDictation() {
+      isPaused = true; 
+      try { recognition.abort(); } catch(e) {} 
+      document.getElementById('status').innerText = "🟡 已暫停";
+      document.getElementById('status').style.color = "#ffc107";
+    }
+
+    function speakOut(text) {
+      isSpeaking = true; 
+      clearTimeout(speakTimeout); 
+
+      try { recognition.abort(); } catch(e) {}
+
+      document.getElementById('status').innerText = "🔊 電腦發聲中 (麥克風已切斷)...";
+      document.getElementById('status').style.color = "#17a2b8";
+
+      globalMsg = new SpeechSynthesisUtterance(text);
+      globalMsg.lang = 'zh-TW';
+      
+      var safeTime = Math.max(3000, text.length * 300) + 2000;
+      
+      speakTimeout = setTimeout(function() {
+          if (isSpeaking) {
+              isSpeaking = false;
+              if (!isPaused) {
+                  try { recognition.start(); } catch(e) {} 
+                  document.getElementById('status').innerText = "🟢 聆聽中...";
+                  document.getElementById('status').style.color = "#28a745";
+              }
+          }
+      }, safeTime);
+
+      globalMsg.onend = function() {
+        setTimeout(function() {
+          if (!isSpeaking) return; 
+          isSpeaking = false;
+          clearTimeout(speakTimeout);
+          if (!isPaused) {
+              try { recognition.start(); } catch(e) {} 
+              document.getElementById('status').innerText = "🟢 聆聽中...";
+              document.getElementById('status').style.color = "#28a745";
+          }
+        }, 800); 
+      };
+
+      globalMsg.onerror = function() {
+        isSpeaking = false;
+        clearTimeout(speakTimeout);
+        if (!isPaused) {
+            try { recognition.start(); } catch(e) {}
+            document.getElementById('status').innerText = "🟢 聆聽中...";
+            document.getElementById('status').style.color = "#28a745";
+        }
+      };
+
+      window.speechSynthesis.speak(globalMsg);
+    }
+
+    function log(msg) {
+      var logDiv = document.getElementById('log');
+      logDiv.innerHTML += msg + "<br>";
+      logDiv.scrollTop = logDiv.scrollHeight;
+    }
+  </script>
+</body>
+</html>
