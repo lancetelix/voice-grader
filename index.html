@@ -33,7 +33,7 @@
     <div id="status">狀態：待命中...</div>
     
     <div class="manual-box">
-      <b style="color: #555;">⌨️️ 語音不聽話？手動救援輸入：</b><br>
+      <b style="color: #555;">⌨️ 語音不聽話？手動救援輸入：</b><br>
       <div style="display: flex; margin-top: 8px;">
         <input type="text" id="manualInput" placeholder="例如輸入：廣播 (按Enter送出)" style="width: 75%; margin: 0; border-radius: 4px 0 0 4px;">
         <button class="btn-manual" onclick="sendManual()" style="width: 25%; border-radius: 0 4px 4px 0;">送出</button>
@@ -177,9 +177,14 @@
         
         log("⏳ 正在傳送指令至 Google 雲端...");
 
-        fetch(fetchUrl)
+        // 💡 加入 8 秒超時防線
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 8000);
+
+        fetch(fetchUrl, { signal: controller.signal })
           .then(res => {
-             if (!res.ok) throw new Error("HTTP 錯誤 " + res.status);
+             clearTimeout(timeoutId);
+             if (!res.ok) throw new Error("HTTP 狀態碼 " + res.status);
              return res.json();
           })
           .then(data => {
@@ -197,7 +202,12 @@
              }
           })
           .catch(err => {
-             log("❌ 連線失敗/後台回應異常：" + err.message);
+             clearTimeout(timeoutId);
+             if (err.name === 'AbortError') {
+                 log("❌ 連線逾時：Google 後台超過 8 秒無回應。請確認權限是否設為『所有人』。");
+             } else {
+                 log("❌ 連線失敗/後台異常：" + err.message);
+             }
              if (!isPaused) {
                  document.getElementById('status').innerText = "🟢 聆聽中...";
                  document.getElementById('status').style.color = "#28a745";
