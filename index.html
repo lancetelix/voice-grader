@@ -11,6 +11,7 @@
     .btn-start { background: #28a745; color: white; }
     .btn-pause { background: #ffc107; color: #333; }
     #status { font-weight: bold; color: #0056b3; margin-top: 10px; font-size: 18px;}
+    #currentModeDisplay { font-weight: bold; color: #dc3545; font-size: 20px; margin: 10px 0;}
     #errorMsg { color: #dc3545; font-weight: bold; margin: 5px 0; }
     #log { text-align: left; background: #1e1e1e; color: #00ff66; padding: 10px; border-radius: 6px; height: 150px; overflow-y: auto; margin-top: 15px; font-size: 14px; font-family: monospace; }
   </style>
@@ -18,11 +19,13 @@
 <body>
   <div class="card">
     <h2>🎙 口語作業登記系統</h2>
-    <p>請貼上您的 Google Web App 網址：</p>
+    <p>請貼上 Web App 網址：</p>
     <input type="text" id="webAppUrl" placeholder="https://script.google.com/macros/s/......./exec">
     <div id="errorMsg"></div>
 
-    <p>當前作業欄位：<b id="currentTask">最新欄位</b></p>
+    <p>當前作業：<b id="currentTask">最新欄位</b></p>
+    <div id="currentModeDisplay">當前模式：自動辨識</div>
+
     <button class="btn-start" onclick="startDictation()">▶️ 開始 / 恢復收音</button>
     <button class="btn-pause" onclick="pauseDictation()">⏸️ 暫停 (不關麥克風)</button>
     <div id="status">狀態：待命中...</div>
@@ -34,6 +37,9 @@
     var activeAssignment = "";
     var isPaused = true;       
     var isEngineRunning = false; 
+    
+    // 【新增】用來記憶目前是「正確」還是「錯誤」模式
+    var currentMode = ""; 
 
     window.onload = function() {
       var savedUrl = localStorage.getItem("myWebAppUrl");
@@ -52,55 +58,76 @@
 
         var last = event.results.length - 1;
         var command = event.results[last][0].transcript.trim();
-        
-        // 1. 如果是因為網路閃斷傳來的空白雜音，直接忽略
         if (!command) return;
 
-        // 2. 過濾標點符號與空白
-        command = command.replace(/[，。、！？,\.!?\s]/g, "");
+        // 【修正蟲蟲】把標點符號換成「空白」，並保留原本的空白，數字才不會黏在一起！
+        command = command.replace(/[，。、！？,\.!?]/g, " ");
 
-        // ==========================================
-        // 🚀 【新增防吞字攔截器】
-        // 專門對付「新增作業」這四個字被吃掉的情形
-        // ==========================================
-        // 如果聽到「生作業、新作業、分作業、作業」開頭，強制補齊
+        // 防吞字攔截
         command = command.replace(/^(生作業|新作業|分作業|作業)/, "新增作業");
-        
-        // 如果只聽到「新增」，漏了「作業」兩字，幫它補上
         if (command.startsWith("新增") && !command.startsWith("新增作業")) {
             command = command.replace("新增", "新增作業");
         }
 
-        // ==========================================
-        // 🛠️ 【老師專屬：智慧校正字典】
-        // ==========================================
+        // 校正字典
         const corrections = {
-          "國旗": "國習",
-          "國錫": "國習",
-          "國席": "國習",
-          "席作": "習作",
-          "月": "頁",     
-          "號隊": "號對", 
-          "號錯": "號錯"
+          "國旗": "國習", "國錫": "國習", "國席": "國習", "席作": "習作",
+          "月": "頁", "號隊": "號對", "號錯": "號錯"
         };
-
         for (let wrong in corrections) {
           command = command.split(wrong).join(corrections[wrong]);
         }
-        
         if (!command) return;
 
-        log("聽到指令：" + command);
-        document.getElementById('status').innerText = "🟢 處理中：" + command;
+        // ==========================================
+        // 🧠 【大腦記憶區：模式切換與自動補字】
+        // ==========================================
+        var hasNumbers = /\d+/.test(command);
+        var isSettingMode = false;
+
+        // 1. 如果講話裡面「沒有數字」，可能是在切換模式
+        if (!hasNumbers && !command.includes("新增作業")) {
+           if (command.includes("正確") || command.includes("對") || command.includes("過")) {
+               currentMode = "正確";
+               document.getElementById('currentModeDisplay').innerText = "當前模式：🟢 正確 (Δ) - 請直接報號";
+               speakOut("切換正確模式");
+               log("系統切換至：正確模式");
+               return; // 只要切換模式就好，不用傳送給試算表
+           }
+           if (command.includes("錯誤") || command.includes("錯")) {
+               currentMode = "錯誤";
+               document.getElementById('currentModeDisplay').innerText = "當前模式：🔴 錯誤 (✓) - 請直接報號";
+               speakOut("切換錯誤模式");
+               log("系統切換至：錯誤模式");
+               return;
+           }
+           if (command.includes("好") || command.includes("訂正") || command.includes("完成")) {
+               currentMode = "訂正";
+               document.getElementById('currentModeDisplay').innerText = "當前模式：🔵 訂正銷案 - 請直接報號";
+               speakOut("切換訂正模式");
+               log("系統切換至：訂正模式");
+               return;
+           }
+        }
+
+        // 2. 如果講話裡面「有數字」，但沒有講「正確/錯誤」，我們幫它加上記憶的模式！
+        if (hasNumbers && !command.includes("新增作業") && !command.includes("欠") && !command.includes("缺")) {
+            var hasActionWord = command.match(/(正確|過|對|錯誤|錯|好|訂正|完成)/);
+            if (!hasActionWord && currentMode !== "") {
+                // 自動把記住的模式加到前面 (例如：「4號 10號」變成「正確 4號 10號」)
+                command = currentMode + " " + command;
+            }
+        }
+
+        // ==========================================
+
+        log("最終傳送指令：" + command);
+        document.getElementById('status').innerText = "🟢 處理中...";
 
         var url = document.getElementById('webAppUrl').value.trim();
-        if (!url.includes("script.google.com")) {
-          document.getElementById('errorMsg').innerText = "⚠ 網址格式錯誤，請檢查上方框框。";
-          return;
-        }
+        if (!url.includes("script.google.com")) return;
         
         localStorage.setItem("myWebAppUrl", url);
-        document.getElementById('errorMsg').innerText = "";
 
         var fetchUrl = url + "?command=" + encodeURIComponent(command) + "&currentAssignment=" + encodeURIComponent(activeAssignment);
         
@@ -108,29 +135,26 @@
           .then(res => res.json())
           .then(data => {
              log("電腦回應：" + data.speak);
-             speakOut(data.speak);
+             if (data.speak !== "收到指令但未辨識成功") {
+                speakOut(data.speak);
+             }
              if (data.activeAssignment) {
                activeAssignment = data.activeAssignment;
                document.getElementById('currentTask').innerText = activeAssignment;
              }
-             document.getElementById('status').innerText = "🟢 聆聽中...請說出指令";
+             document.getElementById('status').innerText = "🟢 聆聽中...";
           })
           .catch(err => {
-             log("傳送失敗，可能是網路不穩或無效指令。");
-             document.getElementById('status').innerText = "🟢 聆聽中...請說出指令";
+             log("傳送失敗，網路不穩。");
           });
       };
 
       recognition.onend = function() {
-        if (isEngineRunning) {
-          recognition.start();
-        }
+        if (isEngineRunning) { recognition.start(); }
       };
 
       recognition.onerror = function(e) { 
-        if (e.error !== 'no-speech') {
-           log("系統提示: " + e.error); 
-        }
+        if (e.error !== 'no-speech') { log("系統提示: " + e.error); }
       };
     } else {
       document.getElementById('errorMsg').innerText = "⚠️ 此瀏覽器不支援語音功能。";
@@ -139,18 +163,17 @@
     function startDictation() {
       document.getElementById('errorMsg').innerText = "";
       isPaused = false; 
-
       if (!isEngineRunning) {
         recognition.start();
         isEngineRunning = true;
       }
-      document.getElementById('status').innerText = "🟢 聆聽中...請說出指令";
+      document.getElementById('status').innerText = "🟢 聆聽中...";
       document.getElementById('status').style.color = "#28a745";
     }
 
     function pauseDictation() {
       isPaused = true; 
-      document.getElementById('status').innerText = "🟡 已暫停 (麥克風待命不關閉)";
+      document.getElementById('status').innerText = "🟡 已暫停";
       document.getElementById('status').style.color = "#ffc107";
     }
 
