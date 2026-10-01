@@ -29,7 +29,7 @@
     <div id="currentModeDisplay">當前模式：自動辨識</div>
 
     <button class="btn-start" onclick="startDictation()">▶️ 開始 / 恢復收音</button>
-    <button class="btn-pause" onclick="pauseDictation()">⏸️ 暫停 (不關麥克風)</button>
+    <button class="btn-pause" onclick="pauseDictation()">⏸️ 暫停收音</button>
     <div id="status">狀態：待命中...</div>
     
     <div class="manual-box">
@@ -47,11 +47,9 @@
     var recognition;
     var activeAssignment = "";
     var isPaused = true;       
-    var isEngineRunning = false; 
     var currentMode = ""; 
     var isSpeaking = false; 
     
-    // 🛡️ 解決 Chrome 念太久當機的專用變數
     var globalMsg; 
     var speakTimeout; 
 
@@ -78,15 +76,20 @@
         if (isPaused || isSpeaking) return; 
         var last = event.results.length - 1;
         var rawCommand = event.results[last][0].transcript.trim();
-        processCommand(rawCommand); // 交給統一的大腦處理
+        processCommand(rawCommand); 
       };
 
       recognition.onend = function() {
-        if (isEngineRunning) { recognition.start(); }
+        // 🛡️ 只有在「沒有暫停」且「電腦沒有在講話」時，才重新通電
+        if (!isPaused && !isSpeaking) { 
+            try { recognition.start(); } catch(e) {} 
+        }
       };
 
       recognition.onerror = function(e) { 
-        if (e.error !== 'no-speech') { log("系統提示: " + e.error); }
+        if (e.error !== 'no-speech' && e.error !== 'aborted') { 
+            log("系統提示: " + e.error); 
+        }
       };
     } else {
       document.getElementById('errorMsg').innerText = "⚠️ 此瀏覽器不支援語音功能。";
@@ -98,22 +101,19 @@
       if (!rawCommand) return;
       log("⌨️ 手動輸入：" + rawCommand);
       inputField.value = ""; 
-      processCommand(rawCommand); // 手動打字也走一樣的大腦，保證不會出錯
+      processCommand(rawCommand); 
     }
 
-    // 🧠 統一的指令處理大腦 (不管是用講的還是用打的，都從這裡過濾)
     function processCommand(command) {
         if (!command) return;
 
         command = command.replace(/[，。、！？,\.!?]/g, " ");
 
-        // 處理開頭吞字
         command = command.replace(/^(生作業|新作業|分作業|作業)/, "新增作業");
         if (command.startsWith("新增") && !command.startsWith("新增作業")) {
             command = command.replace("新增", "新增作業");
         }
 
-        // 🚀 【終極防呆字典】加入所有可能的贅字與變體
         const corrections = {
           "國旗": "國習", "國錫": "國習", "國席": "國習", "席作": "習作",
           "月": "頁", "號隊": "號對", "號錯": "號錯",
@@ -128,8 +128,6 @@
         if (!command) return;
 
         var hasNumbers = /\d+/.test(command);
-        
-        // 🛡️ 【查詢保護罩】：只要含有「誰沒」或「廣播」，系統絕對不准切換模式！
         var isQuery = command.includes("誰沒") || command.includes("廣播") || command.includes("欠") || command.includes("缺");
         
         if (!hasNumbers && !command.includes("新增作業") && !isQuery) {
@@ -200,60 +198,62 @@
     function startDictation() {
       document.getElementById('errorMsg').innerText = "";
       isPaused = false; 
-      if (!isEngineRunning) {
-        recognition.start();
-        isEngineRunning = true;
-      }
+      try { recognition.start(); } catch(e) {} // 啟動電源
       document.getElementById('status').innerText = "🟢 聆聽中...";
       document.getElementById('status').style.color = "#28a745";
     }
 
     function pauseDictation() {
       isPaused = true; 
+      try { recognition.abort(); } catch(e) {} // 強制切斷電源
       document.getElementById('status').innerText = "🟡 已暫停";
       document.getElementById('status').style.color = "#ffc107";
     }
 
-    // 🔊 【終極防當機發聲模組】
     function speakOut(text) {
       isSpeaking = true; 
       clearTimeout(speakTimeout); 
 
-      document.getElementById('status').innerText = "🔊 電腦發聲中 (暫停收音)...";
+      // 🛑 【物理防護啟動】：強制切斷麥克風電源！
+      try { recognition.abort(); } catch(e) {}
+
+      document.getElementById('status').innerText = "🔊 電腦發聲中 (麥克風已切斷)...";
       document.getElementById('status').style.color = "#17a2b8";
 
-      // 把對話存入全域變數，防止 Chrome 把它當成垃圾刪掉
       globalMsg = new SpeechSynthesisUtterance(text);
       globalMsg.lang = 'zh-TW';
       
-      // 動態計算這段話需要唸多久 (1個字算0.3秒，最少給3秒，再加2秒緩衝)
       var safeTime = Math.max(3000, text.length * 300) + 2000;
       
-      // 強制解鎖保險絲：時間一到，強制把麥克風耳朵打開，絕不卡死！
       speakTimeout = setTimeout(function() {
-          isSpeaking = false;
-          if (!isPaused) {
-            document.getElementById('status').innerText = "🟢 聆聽中...";
-            document.getElementById('status').style.color = "#28a745";
+          if (isSpeaking) {
+              isSpeaking = false;
+              if (!isPaused) {
+                  try { recognition.start(); } catch(e) {} // 重新通電
+                  document.getElementById('status').innerText = "🟢 聆聽中...";
+                  document.getElementById('status').style.color = "#28a745";
+              }
           }
       }, safeTime);
 
       globalMsg.onend = function() {
         setTimeout(function() {
-          if (!isSpeaking) return; // 已經被保險絲解鎖就不做事
+          if (!isSpeaking) return; 
           isSpeaking = false;
           clearTimeout(speakTimeout);
           if (!isPaused) {
-            document.getElementById('status').innerText = "🟢 聆聽中...";
-            document.getElementById('status').style.color = "#28a745";
+              try { recognition.start(); } catch(e) {} // 重新通電
+              document.getElementById('status').innerText = "🟢 聆聽中...";
+              document.getElementById('status').style.color = "#28a745";
           }
-        }, 500); 
+        }, 800); // 講完再等 0.8 秒才通電，確保回音散去
       };
 
       globalMsg.onerror = function() {
         isSpeaking = false;
         clearTimeout(speakTimeout);
         if (!isPaused) {
+            try { recognition.start(); } catch(e) {}
             document.getElementById('status').innerText = "🟢 聆聽中...";
             document.getElementById('status').style.color = "#28a745";
         }
