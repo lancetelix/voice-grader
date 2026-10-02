@@ -35,7 +35,7 @@
     <div class="manual-box">
       <b style="color: #555;">⌨️ 語音不聽話？手動救援輸入：</b><br>
       <div style="display: flex; margin-top: 8px;">
-        <input type="text" id="manualInput" placeholder="例如輸入：廣播 (按Enter送出)" style="width: 75%; margin: 0; border-radius: 4px 0 0 4px;">
+        <input type="text" id="manualInput" placeholder="例如輸入：切換作業 數習38頁 (按Enter送出)" style="width: 75%; margin: 0; border-radius: 4px 0 0 4px;">
         <button class="btn-manual" onclick="sendManual()" style="width: 25%; border-radius: 0 4px 4px 0;">送出</button>
       </div>
     </div>
@@ -118,7 +118,8 @@
           "月": "頁", "號隊": "號對", "號錯": "號錯",
           "訂證": "訂正", "頂正": "訂正", "單號": "3號", "山號": "3號", "傘號": "3號", "兩號": "2號",
           "水沒": "誰沒", "隨沒": "誰沒", "誰沒有": "誰沒", "誰還沒": "誰沒", "有誰沒": "誰沒",
-          "廣博": "廣播", "光播": "廣播", "廣波": "廣播"
+          "廣博": "廣播", "光播": "廣播", "廣波": "廣播",
+          "切換": "切換作業", "切換作業作業": "切換作業"
         };
 
         for (let wrong in corrections) {
@@ -128,8 +129,10 @@
 
         var hasNumbers = /\d+/.test(command);
         var isQuery = command.includes("誰沒") || command.includes("廣播") || command.includes("欠") || command.includes("缺");
+        var isSwitch = command.includes("切換作業");
         
-        if (!hasNumbers && !command.includes("新增作業") && !isQuery) {
+        // 只有非查詢、非切換、非數字時，才允許自動切換標記模式
+        if (!hasNumbers && !command.includes("新增作業") && !isQuery && !isSwitch) {
            if (command.includes("正確") || command.includes("對") || command.includes("過")) {
                currentMode = "正確";
                document.getElementById('currentModeDisplay').innerText = "當前模式：🟢 正確 (Δ) - 請直接報號";
@@ -147,7 +150,7 @@
            }
         }
 
-        if (hasNumbers && !command.includes("新增作業") && !isQuery) {
+        if (hasNumbers && !command.includes("新增作業") && !isQuery && !isSwitch) {
             var hasActionWord = command.match(/(正確|過|對|錯誤|錯|好|訂正|完成)/);
             if (!hasActionWord && currentMode !== "") {
                 command = currentMode + " " + command;
@@ -177,7 +180,6 @@
         
         log("⏳ 正在傳送指令至 Google 雲端...");
 
-        // 💡 加入 8 秒超時防線
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 8000);
 
@@ -204,7 +206,7 @@
           .catch(err => {
              clearTimeout(timeoutId);
              if (err.name === 'AbortError') {
-                 log("❌ 連線逾時：Google 後台超過 8 秒無回應。請確認權限是否設為『所有人』。");
+                 log("❌ 連線逾時：Google 後台超過 8 秒無回應。");
              } else {
                  log("❌ 連線失敗/後台異常：" + err.message);
              }
