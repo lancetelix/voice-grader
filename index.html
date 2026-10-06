@@ -35,7 +35,7 @@
     <div class="manual-box">
       <b style="color: #555;">⌨️ 語音不聽話？手動救援輸入：</b><br>
       <div style="display: flex; margin-top: 8px;">
-        <input type="text" id="manualInput" placeholder="例如輸入：切換作業 數習38頁 (按Enter送出)" style="width: 75%; margin: 0; border-radius: 4px 0 0 4px;">
+        <input type="text" id="manualInput" placeholder="例如輸入：切換作業 數習32頁 (按Enter送出)" style="width: 75%; margin: 0; border-radius: 4px 0 0 4px;">
         <button class="btn-manual" onclick="sendManual()" style="width: 25%; border-radius: 0 4px 4px 0;">送出</button>
       </div>
     </div>
@@ -113,8 +113,10 @@
             command = command.replace("新增", "新增作業");
         }
 
+        // 🚀 【強效同音字自動校正字典】
         const corrections = {
           "國旗": "國習", "國錫": "國習", "國席": "國習", "席作": "習作",
+          "述息": "數習", "溯習": "數習", "複習": "數習", "數學習做": "數學習作",
           "月": "頁", "號隊": "號對", "號錯": "號錯",
           "訂證": "訂正", "頂正": "訂正", "單號": "3號", "山號": "3號", "傘號": "3號", "兩號": "2號",
           "水沒": "誰沒", "隨沒": "誰沒", "誰沒有": "誰沒", "誰還沒": "誰沒", "有誰沒": "誰沒",
@@ -131,7 +133,6 @@
         var isQuery = command.includes("誰沒") || command.includes("廣播") || command.includes("欠") || command.includes("缺");
         var isSwitch = command.includes("切換作業");
         
-        // 只有非查詢、非切換、非數字時，才允許自動切換標記模式
         if (!hasNumbers && !command.includes("新增作業") && !isQuery && !isSwitch) {
            if (command.includes("正確") || command.includes("對") || command.includes("過")) {
                currentMode = "正確";
