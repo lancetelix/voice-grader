@@ -106,14 +106,19 @@
     function processCommand(command) {
         if (!command) return;
 
+        // 1. 清除標點符號
         command = command.replace(/[，。、！？,\.!?]/g, " ");
 
+        // 2. 🛡️ 【關鍵修復】：自動剔除語音產生的所有空格，讓「述 息」直接變成「述息」
+        command = command.replace(/\s+/g, "");
+
+        // 3. 處理開頭吞字
         command = command.replace(/^(生作業|新作業|分作業|作業)/, "新增作業");
         if (command.startsWith("新增") && !command.startsWith("新增作業")) {
             command = command.replace("新增", "新增作業");
         }
 
-        // 🚀 【強效同音字自動校正字典】
+        // 4. 🚀 【強效同音字自動校正字典】
         const corrections = {
           "國旗": "國習", "國錫": "國習", "國席": "國習", "席作": "習作",
           "述息": "數習", "溯習": "數習", "複習": "數習", "數學習做": "數學習作",
